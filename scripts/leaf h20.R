@@ -179,11 +179,43 @@ summary(m.gam <- gam(MSE ~ s(l1, k = 4) +
                        te(depth, SumNeurons, k = 4),
                      data = model.res.dat))
 
+m.gam$formula
 
 par(mfrow = c(3, 2))
 for (i in 1:6) {
   plot(m.gam, select = i)
 }
+
+library(rBayesianOptimization)
+gam_optimizer <- function(l1_p,l2_p,input_dropout_p,rho_p,epsilon_p,MeanHiddenDropout_p,depth_p,SumNeurons_p) 
+  {
+    params <-data.frame(l1=l1_p,
+                        l2=l2_p,
+                        input_dropout=input_dropout_p,
+                        rho=rho_p,
+                        epsilon=epsilon_p,
+                        MeanHiddenDropout=MeanHiddenDropout_p,
+                        depth=depth_p,
+                        SumNeurons=SumNeurons_p)
+    
+    gam.MSE <-predict(m.gam,params)
+ 
+    list(Score =gam.MSE,
+         Pred = 0)
+}
+
+OPT_Res <- BayesianOptimization(gam_optimizer,
+                                bounds = list(l1 = c(0, 0.01),
+                                              l2 = c(0, 0.01),
+                                input_dropout  = c(0, 0.5),
+                                rho  =  c(0.8, 1),
+                                epsilon = c(0,0.001),
+                                MeanHiddenDropout = c(0.15,0.5),
+                                depth = c(1,5),
+                                SumNeurons = c(500,1000)),
+                                init_points = 2, n_iter = 10,
+                                acq = "ucb", kappa = 2.576, eps = 0.0,
+                                verbose = TRUE)
 
 
 model.optimized <- h2o.deeplearning(
