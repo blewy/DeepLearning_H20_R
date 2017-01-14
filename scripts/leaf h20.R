@@ -147,6 +147,7 @@ use.seeds <- c(403L, 10L, 329737957L, -753102721L, 1148078598L,
 
 model.res <- lapply(use.seeds, run)
 
+save(model.res, file = "./RData/model.res.RData", compress = F)
 
 library(reshape2)
 library(ggplot2)
@@ -176,15 +177,21 @@ summary(m.gam <- gam(MSE ~ s(l1, k = 4) +
                        s(rho, k = 4) +
                        s(epsilon, k = 4) +
                        s(MeanHiddenDropout, k = 4) +
-                       te(depth, SumNeurons, k = 4),
+                       s(depth, k = 4) +
+                       s(SumNeurons, k = 4) ,
+                       #te(depth, SumNeurons, k = 4),
                      data = model.res.dat))
 
 m.gam$formula
 
-par(mfrow = c(3, 2))
-for (i in 1:6) {
+par(mfrow = c(4, 2))
+for (i in 1:8) {
   plot(m.gam, select = i)
 }
+
+save(m.gam, file = "./RData/m.gam.RData", compress = F)
+
+#### -------- Bayesian Optimization --------------
 
 library(rBayesianOptimization)
 gam_optimizer <- function(l1_p,l2_p,input_dropout_p,rho_p,epsilon_p,MeanHiddenDropout_p,depth_p,SumNeurons_p) 
@@ -198,46 +205,64 @@ gam_optimizer <- function(l1_p,l2_p,input_dropout_p,rho_p,epsilon_p,MeanHiddenDr
                         depth=depth_p,
                         SumNeurons=SumNeurons_p)
     
-    gam.MSE <-predict(m.gam,params)
+    gam.MSE <- predict(m.gam,params)*-1
  
     list(Score =gam.MSE,
          Pred = 0)
 }
 
+
+initial_grid <- model.res.dat
+initial_grid$MSE<-NULL
+ 
+
 OPT_Res <- BayesianOptimization(gam_optimizer,
                                 bounds = list(l1 = c(0, 0.01),
-                                              l2 = c(0, 0.01),
-                                input_dropout  = c(0, 0.5),
+                                              l2 = c(0.001, 0.01),
+                                input_dropout  = c(0.001, 0.5),
                                 rho  =  c(0.8, 1),
                                 epsilon = c(0,0.001),
                                 MeanHiddenDropout = c(0.15,0.5),
                                 depth = c(1,5),
-                                SumNeurons = c(500,1000)),
-                                init_points = 2, n_iter = 10,
-                                acq = "ucb", kappa = 2.576, eps = 0.0,
+                                SumNeurons = c(990,1000)),
+                                #init_grid_dt = initial_grid, 
+                                init_points = 100, 
+                                n_iter = 3,
+                                acq = "ucb", 
+                                kappa = 2.576, 
+                                eps = 0.0,
                                 verbose = TRUE)
 
 
+best_params<- OPT_Res$Best_Par
+
+best_params["l1"]
+
+
 model.optimized <- h2o.deeplearning(
-  x = colnames(use.train.x),
-  y = "Outcome",
-  training_frame = h2oactivity.train,
+  x = xnames,
+  y = "species",
+  training_frame = leafs.train,
   activation = "RectifierWithDropout",
-  hidden = c(300, 300, 300),
+  hidden = best_params["SumNeurons"],
   epochs = 100,
   loss = "CrossEntropy",
-  input_dropout_ratio = .08,
-  hidden_dropout_ratios = c(.50, .50, .50),
-  l1 = .002,
-  l2 = 0,
-  rho = .95,
-  epsilon = 1e-10,
+  input_dropout_ratio = best_params["input_dropout"],
+  hidden_dropout_ratios = best_params["MeanHiddenDropout"],
+  l1 = best_params["l1"],
+  l2 = best_params["l2"],
+  rho = best_params["rho"],
+  epsilon = best_params["epsilon"],
   export_weights_and_biases = TRUE,
   model_id = "optimized_model"
 )
 
-h2o.performance()
 
+h2o.performance(model.optimized)
+
+
+
+summary(model.res.dat$MSE )
 
 
 
